@@ -1,97 +1,94 @@
 ﻿using System;
 using System.IO;
-using System.Linq;
 using System.Threading;
 using System.Threading.Tasks.Dataflow;
 
 namespace FolderListener.Domain
 {
-	public class Listener
+	public class Listener: IDisposable
 	{
-		private readonly ActionBlock<string> _actionBlock;
+		private ActionBlock<string> _actionBlock;
+		private FileSystemWatcher _watcher;
 
-		public Listener()
+		/// <summary>
+		/// Запуск наблюдения за директорией 
+		/// </summary>
+		/// <param name="sourceDirectoryPath">Путь к папке с исходными документами в формате TXT</param>
+		/// <param name="destinationDirectoryPath">Путь к папке для результатов</param>
+		/// <param name="maxDegreeOfParallelism">Максимально допумтимое количество потоков для обработки файлов</param>
+		public void Start(string sourceDirectoryPath, string destinationDirectoryPath, int maxDegreeOfParallelism = 4)
 		{
-			_actionBlock = new ActionBlock<string>(ProcessFile, new ExecutionDataflowBlockOptions
+			_actionBlock = new ActionBlock<string>(p => ProcessFile(p, destinationDirectoryPath), new ExecutionDataflowBlockOptions
 			{
-				MaxDegreeOfParallelism = 4
+				MaxDegreeOfParallelism = maxDegreeOfParallelism,
+				
 			});
-		}
-		public void Start(string sourceDirectoryPath, string destinationDirectoryPath)
-		{
-			var watcher = new FileSystemWatcher
+
+
+			_watcher = new FileSystemWatcher
 			{
-				Path = @"C:\Work\test",
-				IncludeSubdirectories = true,
+				Path = sourceDirectoryPath,
 				Filter = "*.txt"
 			};
 
-
-			// Add event handlers.
-			watcher.Created += OnAdded;
-
-
-			// Begin watching.
-			watcher.EnableRaisingEvents = true;
+			_watcher.Created += OnAdded;
+			_watcher.EnableRaisingEvents = true;
 		}
 
 
-		public void Stop()
-		{
-			
-		}
-
+		/// <summary>
+		/// Метод обработки события появления нового файла. 
+		/// </summary>
 		private void OnAdded(object source, FileSystemEventArgs e)
 		{
+			// добавляем путь к файлу в очередь
 			_actionBlock.Post(e.FullPath);
-			Console.WriteLine(e.FullPath);
+			Console.WriteLine($"File:{e.FullPath} added");
 		}
 
-		private static void ProcessFile(string path)
+		/// <summary>
+		/// Подсчет символов и сохранение файла в директорию результатов
+		/// </summary>
+		/// <param name="filePath">Путь к исходному файлу</param>
+		/// <param name="destinationDirectoryPath">Путь к папке с результатами</param>
+		/// <param name="numberOfRetries">Количество попыток для прочтения файла</param>
+		/// <param name="delayOnRetry">Время ожидания перед повторной попыткой, при ошибке прочтения файла</param>
+		private static void ProcessFile(string filePath, string destinationDirectoryPath, int numberOfRetries = 3, int delayOnRetry = 1000)
 		{
-			try
+			Console.WriteLine($"File:{filePath} processing started");
+			Thread.Sleep(5000);
+
+			for (var i = 1; i <= numberOfRetries; ++i)
 			{
-				if (path == null ) return;
-				using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
-				using (var reader = new StreamReader(stream))
+				try
 				{
-					var fileName = Path.GetFileName(path);
-					var charsLength = reader.ReadToEnd().Length;
-					File.WriteAllText(Path.Combine(@"C:\Work\test1\", fileName), charsLength.ToString());
+					using (var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read))
+					using (var reader = new StreamReader(stream))
+					{
+						var fileName = Path.GetFileName(filePath);
+						var charsLength = reader.ReadToEnd().Length;
+						File.WriteAllText(Path.Combine(destinationDirectoryPath, fileName), charsLength.ToString());
+						Console.WriteLine($"File:{filePath} was processed successfully");
+					}
+					break;
 				}
-				
-				
-
-				Console.WriteLine($"File:{path}, thread: { Thread.CurrentThread.ManagedThreadId}");
+				catch (Exception) 
+				{
+					Thread.Sleep(delayOnRetry);
+					if (numberOfRetries < i)
+					{
+						Console.WriteLine($"File:{filePath} processing failed");
+					}
+				}
 			}
-			catch (Exception e)
-			{
-				Console.WriteLine(e);
-			}
-
-
 		}
 
-
-		private bool IsFileLocked(FileInfo file)
+		public void Dispose()
 		{
-			FileStream stream = null;
+			_watcher?.Dispose();
+			_actionBlock?.Complete();
 
-			try
-			{
-				stream = file.Open(FileMode.Open, FileAccess.ReadWrite, FileShare.None);
-			}
-			catch (IOException)
-			{
-				return true;
-			}
-			finally
-			{
-				stream?.Close();
-			}
-
-			//file is not locked
-			return false;
+			_actionBlock?.Completion.Wait();
 		}
 	}
 }

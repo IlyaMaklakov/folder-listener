@@ -5,6 +5,9 @@ using System.Threading;
 
 namespace TestFilesProducer
 {
+	/// <summary>
+	/// Програма для генерации тестовых документов
+	/// </summary>
 	public class Program
 	{
 		public static void Main(string[] args)
@@ -14,6 +17,10 @@ namespace TestFilesProducer
 
 		}
 
+		/// <summary>
+		/// Генерация тестовых документов
+		/// </summary>
+		/// <param name="state"></param>
 		private static void GenerateFile(object state)
 		{
 			var random = new Random();
